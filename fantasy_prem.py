@@ -7,12 +7,6 @@ from datetime import date
 
 
 
-####Ideas: -put in yellow cards factor
-####       -figure out keeper model
-
-
-
-
 #Get data
 url = 'https://fantasy.premierleague.com/api/bootstrap-static/'
 
@@ -28,7 +22,8 @@ teams_df = pd.DataFrame(json['teams'])
 
 events_df = pd.DataFrame(json['events'])
 
-print(events_df.columns)
+print(elements_df.columns)
+
 
 #Getting fixture data for individual players
 def get_fixtures(players):
@@ -60,16 +55,29 @@ def minutes_pts(players):
     avg_minutes = players['minutes']/players['games_played']
     return (avg_minutes >= 70)*1 + (avg_minutes >= 45)*1
 
+#Expected points for yellows
+def yellows_pts(players):
+    avg_yellows = players['yellow_cards']/players['games_played']
+    return avg_yellows*(-1)
+
+#Points for saves
+def saves_pts(players):
+    avg_saves = players['saves']/players['games_played']
+    return avg_saves*(1/3)
+
+
 
 #Totalling points function
 def xPts(players):
     return np.where(players['element_type']==4,
-            players['xG']*4 + players['xA']*3 + minutes_pts(players),
+            players['xG']*4 + players['xA']*3 + minutes_pts(players) + yellows_pts(players),
             np.where(players['element_type']==3,
-                players['xG']*5 + players['xA']*3 + poisson.pmf(0,players['xGA'])*1 + minutes_pts(players),
+                players['xG']*5 + players['xA']*3 + poisson.pmf(0,players['xGA'])*1 + minutes_pts(players) + yellows_pts(players),
                     np.where(players['element_type']==2,
-                        players.xG*6 + players.xA*3 + poisson.pmf(0,players.xGA)*4 + (poisson.cdf(4,players.xGA)-poisson.cdf(2,players.xGA))*(-2) + (1-poisson.cdf(4,players.xGA))*(-2) + minutes_pts(players),
-                        0)))
+                        players.xG*6 + players.xA*3 + poisson.pmf(0,players.xGA)*4 + (poisson.cdf(4,players.xGA)-poisson.cdf(2,players.xGA))*(-2) + (1-poisson.cdf(4,players.xGA))*(-2) + minutes_pts(players) + yellows_pts(players),
+                        np.where(players['element_type']==1,
+                            poisson.pmf(0,players.xGA)*4 + (poisson.cdf(4,players.xGA)-poisson.cdf(2,players.xGA))*(-2) + (1-poisson.cdf(4,players.xGA))*(-2) + minutes_pts(players) + yellows_pts(players) + saves_pts(players),
+                            0))))
 
                         
 
@@ -141,18 +149,20 @@ elements_df['xA'] = elements_df.asst_contr*elements_df.xGF
 
 elements_df['xPts'] = xPts(elements_df)
 
-output = elements_df[['web_name','element_type','team','next_fixture','now_cost','xPts']]
+output = elements_df[['id', 'web_name','element_type','minutes','team','next_fixture','now_cost','xGF', 'xGA', 'xG', 'xA', 'xPts']]
 
 output['Team'] = output.team.map(teams_df.set_index('id').name)
 output['Opponent'] = output.next_fixture.map(teams_df.set_index('id').name)
 output['Position'] = output.element_type.map(element_types_df.set_index('id').singular_name)
 
-output = output[['web_name', 'Position', 'Team', 'Opponent', 'now_cost', 'xPts']]
+output = output[['id', 'web_name','minutes', 'Position', 'Team', 'Opponent', 'now_cost', 'xGF', 'xGA', 'xG', 'xA', 'xPts']]
 
+gameweek = max(events_df[events_df['average_entry_score']>0]['id']) + 1
 
+output['Gameweek'] = gameweek
 
 print(output)
 
-file_name = 'pts_model_' + str(date.today()) + '.csv'
+file_name = 'pts_model_GW' + str(gameweek) + '.csv'
 
 output.to_csv(file_name)
